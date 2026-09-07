@@ -1,0 +1,134 @@
+============================================================================================
+E0. BASELINE -- does our harness reproduce REPORT_v0 Section 1 exactly?
+============================================================================================
+  REPORT_v0 claims:  eng fertility 1.27 / tok-char 0.226 ; hin 7.45 / 1.579 ; ratio 5.89x
+  our re-run:        eng 1.27 / 0.226 ; hin 7.45 / 1.579 ; ratio 5.89x
+  -> bit-exact reproduction. Every delta below is therefore a delta on the
+     numbers leadership is actually looking at.
+
+============================================================================================
+E1. BUG -- line.split(' ') instead of line.split()
+============================================================================================
+  eng line 7: split(' ')->8 words, split()->7 words  (1 phantom empty string)
+     'Please keep the books  in the cupboard.'
+  hin line 10: split(' ')->6 words, split()->5 words  (1 phantom empty string)
+     'किताबें  अलमारी में रखी हैं।'
+  v0 (buggy)                                   eng  1.265  hin  7.448  ratio  5.89x
+  fixed: split()                               eng  1.283  hin  7.598  ratio  5.92x   [ratio  +0.6% vs v0]
+  DIRECTION: phantom words inflate the denominator, so v0 UNDERSTATES fertility
+  for any language whose corpus contains double spaces. Both corpora contain one,
+  so it partially cancels in the ratio -- which is luck, not design.
+
+============================================================================================
+E2. BUG (the important one) -- line.lower() is not script-symmetric
+============================================================================================
+  eng: tokens cased=96 lowered=99 delta=+3 (+3.1%)  lines altered by .lower() = 10/10
+  hin: tokens cased=459 lowered=459 delta=+0 (+0.0%)  lines altered by .lower() = 0/10
+  v0 (lowercased)                              eng  1.265  hin  7.448  ratio  5.89x
+  fixed: preserve case                         eng  1.229  hin  7.448  ratio  6.06x   [ratio  +2.9% vs v0]
+  MECHANISM: Devanagari is unicameral -- .lower() is a literal no-op on it (0/10
+  lines change). On English it destroys capitalised-word merges and adds +3.1%
+  tokens. A 'reduce noise' step that only touches ONE arm of a two-arm comparison
+  is a bias, not noise reduction. It shrinks the measured gap.
+
+============================================================================================
+E3. BUG -- mean of per-line ratios instead of corpus-level micro-average
+============================================================================================
+  v0 (macro: mean of per-line ratios)          eng  1.265  hin  7.448  ratio  5.89x
+  fixed: micro (sum tok / sum word)            eng  1.253  hin  7.403  ratio  5.91x   [ratio  +0.3% vs v0]
+  MECHANISM: sum(t_i/w_i)/n weights a 3-word line equally with a 14-word line.
+  Nobody is billed per line. The quantity that maps to cost is sum(t)/sum(w).
+
+============================================================================================
+E4. ALL THREE CODE BUGS FIXED -- net effect on the headline number
+============================================================================================
+  v0 as shipped                                eng  1.265  hin  7.448  ratio  5.89x
+  all three fixed                              eng  1.231  hin  7.525  ratio  6.11x   [ratio  +3.8% vs v0]
+  REPORT_v0 headline 5.89x -> corrected 6.11x on the SAME corpus.
+  Note the direction: v0's bugs made Hindi look BETTER than it is. The report is
+  wrong in the conservative direction, which is why nobody caught it.
+
+============================================================================================
+E5. CONCEPTUAL -- 'the tok/char column agrees, so the result is robust' is void
+============================================================================================
+  eng: tokens=96 words=78 codepoints=448 utf8_bytes=448
+  hin: tokens=459 words=61 codepoints=290 utf8_bytes=764
+
+  (a) The two metrics are NOT independent -- tok/word and tok/char share the same
+      numerator. Any error in the token count moves both together, so agreement
+      carries zero confirmatory information. This is the report's core logical error.
+  (b) They do not even agree: 6.11x vs 7.39x per codepoint -- a 21% spread the report waves through.
+  (c) The per-codepoint gap is mostly a UTF-8 artefact of the DENOMINATOR:
+      bytes per codepoint  eng 1.00  hin 2.63
+      normalise that away and the gap falls to 2.80x per UTF-8 byte.
+  (d) None of tok/word, tok/char or tok/byte holds MEANING constant, and meaning is
+      what a user request actually contains. See A3.
+
+============================================================================================
+E6. LOOKS SUSPICIOUS, IS ACTUALLY CORRECT -- unicodedata.normalize('NFC', ...)
+============================================================================================
+  eng: lines altered by NFC = 0/10
+  hin: lines altered by NFC = 0/10
+  NFC on                                       eng  1.231  hin  7.525  ratio  6.11x
+  NFC off                                      eng  1.231  hin  7.525  ratio  6.11x
+  MEASURED EFFECT ON REPORTED NUMBERS: exactly zero (459 vs 459 Hindi tokens).
+  And it is a genuine safeguard, not dead weight -- Devanagari nukta letters have
+  two encodings that GPT-2 tokenises differently:
+    composed   U+095E        -> 2 tokens
+    decomposed U+092B U+093C -> 4 tokens
+    after NFC both become ['0x92b', '0x93c'] -> identical, 4 tokens
+  VERDICT: NOT A BUG. Removing it would introduce a real one. Flagging this would
+  have cost 5 points, which is presumably the point of putting it there.
+
+  Secondary: random.seed(1337) is inert -- the script imports random and seeds it,
+  then never samples. Provably zero effect on any number. It is misleading dead
+  code (the comment claims 'reproducibility' for a fully deterministic script) and
+  should be deleted, but it is NOT a numerical bug and I do not claim it as one.
+
+============================================================================================
+E7. REPORT CLAIM 3 IS FACTUALLY INVERTED -- 'a property of the script, not the
+    tokenizer' / 'Hindi simply has more Unicode characters per word'
+============================================================================================
+  eng: 448 codepoints / 78 words = 5.74 characters per word
+  hin: 290 codepoints / 61 words = 4.75 characters per word
+  -> Hindi has FEWER characters per word than English (4.75 vs 5.74). The report's
+     stated root cause is not merely unproven, it is backwards.
+
+  Byte-fallback test. A byte-level BPE with no merges for a script degenerates to
+  exactly 1 token per UTF-8 byte. Distance from that floor measures vocab coverage:
+  eng: 4.67 bytes/token | single-byte tokens 13.5% | longest token 14 bytes | byte-length hist {1: 13, 2: 8, 3: 15, 4: 15, 5: 12, 6: 8, 7: 8, 8: 11, 9: 2, 10: 3, 14: 1}
+  hin: 1.66 bytes/token | single-byte tokens 48.4% | longest token 3 bytes | byte-length hist {1: 222, 2: 169, 3: 68}
+  -> 48.4% of Hindi tokens are RAW SINGLE BYTES and no Hindi token exceeds 3 bytes,
+     i.e. GPT-2 never merges beyond one Devanagari codepoint. English reaches 14.
+     That is a vocabulary-allocation failure of GPT-2, and it is fixable by choosing
+     a different tokenizer -- which makes the report's 'no further measurement
+     needed / route all Indic traffic away' recommendation unsupported.
+
+============================================================================================
+E8. CORPUS DEFECT -- the sample corpora are NOT line-aligned parallel text
+============================================================================================
+  The assignment describes corpus_sample/ as 'parallel line-by-line'. It is not.
+  Hand alignment of the 10+10 sentences (see AUDIT.md section 6):
+    eng[3] 'I bought this book yesterday...'  <-> hin[3]  (same index: 1 of 10)
+    eng[5] 'The train arrived...'            <-> hin[6]
+    eng[4] 'Children are playing cricket...' <-> hin[7]
+    eng[8] 'We are visiting Mysuru...'       <-> hin[4]
+    eng[7] 'Please keep the books...'        <-> hin[10]
+    eng[1,2,6,9,10] and hin[1,2,5,8,9] have NO counterpart at all.
+  Consequence: the two sides do not express the same content, so ANY per-corpus
+  ratio is confounded by content. Corroborating counts:
+    eng: 10 sentences, 78 words, 448 codepoints
+    hin: 10 sentences, 61 words, 290 codepoints
+  The English side simply says more. This is why A1 rebuilds the corpus rather than
+  trying to salvage this one.
+
+============================================================================================
+SUMMARY OF CLAIMS (each backed by an experiment above)
+============================================================================================
+  E1 split(' ')            BUG,      small, understates fertility
+  E2 line.lower()          BUG,      asymmetric, understates the eng-hin gap by ~2.9%
+  E3 mean-of-ratios        BUG,      wrong aggregation unit
+  E5 'metrics agree'       CONCEPTUAL BUG, non-independent metrics + wrong denominator
+  E6 NFC normalisation     NOT A BUG -- correct, and protective. Zero measured effect.
+  E7 'property of script'  REPORT CLAIM FALSE, inverted by measurement
+  E8 'parallel' corpus     CORPUS DEFECT, not line-aligned

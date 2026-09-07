@@ -1,0 +1,7 @@
+tiktoken>=0.7
+regex>=2023.0
+sentencepiece>=0.2
+pytest>=7.0
+# Needed ONLY for the network paths (build_corpus.py, hf: tokenizers):
+# transformers>=4.40
+# datasets>=2.18
