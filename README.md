@@ -100,6 +100,8 @@ vocab fails loudly rather than quietly producing plausible numbers.
 
 ## Honesty ledger
 
+<img width="1452" height="71" alt="image" src="https://github.com/user-attachments/assets/19a0fdfa-4aa7-4c5e-ab6e-66d5f7509a68" />
+
 What is measured here, and what is not:
 
 - **Measured, real, committed:** the bit-exact v0 reproduction; every A2 ablation;
